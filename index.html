@@ -394,7 +394,6 @@
       tagger: find(['tagger']),
       username: find(['username']),
       appVersion: find(['appversion']),
-      projectName: find(['projectname']),
       annotationCount: find(['annotationcount']),
       imageLink: find(['imagelinkwithannotations','imagelink']),
     };
@@ -490,17 +489,39 @@
     // per-date aggregation: key = country|date
     const dateAgg = {}; // { 'Country|2026-08-24': {country, date, stores:Set, images:0} }
     const flagIssues = []; // rows where analytics flag == 0
-    const topAnnotation = {}; // { 'Country|Project': best row so far }
-    const noAnnotationData = []; // countries/files with no annotation-count column at all
+    const annotationPerFile = []; // one entry per uploaded file: { country, fileName, hasData, rows: [...] }
+    const TOP_N = 25;
 
     usable.forEach(entry => {
       const cm = entry.colMap;
       const usesPerRowImages = cm.imagesCol !== -1;      // Portugal-style
       const usesRowAsImage = !usesPerRowImages && cm.totalImagesCol !== -1; // Czechia-style
 
-      if (cm.annotationCount === -1 || cm.imageLink === -1){
-        noAnnotationData.push(entry.country);
+      // ---- annotation-count / image-link report for this file ----
+      const fileAnnotRows = [];
+      if (cm.annotationCount !== -1 && cm.imageLink !== -1){
+        entry.rows.forEach(r => {
+          const annotVal = r[cm.annotationCount];
+          const annotNum = (typeof annotVal === 'number') ? annotVal : parseFloat(annotVal);
+          const link = r[cm.imageLink];
+          if (!isNaN(annotNum) && link){
+            fileAnnotRows.push({
+              annotationCount: annotNum,
+              imageLink: link,
+              date: toDateKey(cm.date !== -1 ? r[cm.date] : null),
+              shopId: cm.shopId !== -1 ? r[cm.shopId] : (cm.shopIdAlt !== -1 ? r[cm.shopIdAlt] : null),
+              shopName: cm.shopName !== -1 ? r[cm.shopName] : null,
+            });
+          }
+        });
+        fileAnnotRows.sort((a,b) => b.annotationCount - a.annotationCount);
       }
+      annotationPerFile.push({
+        country: entry.country,
+        fileName: entry.name,
+        hasData: cm.annotationCount !== -1 && cm.imageLink !== -1,
+        rows: fileAnnotRows.slice(0, TOP_N), // top 25, or all of them if fewer than that exist
+      });
 
       entry.rows.forEach(r => {
         const dateRaw = cm.date !== -1 ? r[cm.date] : null;
@@ -538,35 +559,13 @@
             tagger: cm.tagger !== -1 ? r[cm.tagger] : (cm.username !== -1 ? r[cm.username] : null),
           });
         }
-
-        // track highest annotation count per project (falls back to per-country if no project column)
-        if (cm.annotationCount !== -1 && cm.imageLink !== -1){
-          const annotVal = r[cm.annotationCount];
-          const annotNum = (typeof annotVal === 'number') ? annotVal : parseFloat(annotVal);
-          if (!isNaN(annotNum)){
-            const projectName = cm.projectName !== -1 ? (r[cm.projectName] || entry.country) : entry.country;
-            const key = entry.country + '|' + projectName;
-            const current = topAnnotation[key];
-            if (!current || annotNum > current.annotationCount){
-              topAnnotation[key] = {
-                country: entry.country,
-                project: projectName,
-                date: dateKey,
-                shopId: shopId,
-                shopName: shopName,
-                annotationCount: annotNum,
-                imageLink: r[cm.imageLink],
-              };
-            }
-          }
-        }
       });
     });
 
-    renderReport(dateAgg, flagIssues, topAnnotation, noAnnotationData, usable);
+    renderReport(dateAgg, flagIssues, annotationPerFile, usable);
   }
 
-  function renderReport(dateAgg, flagIssues, topAnnotation, noAnnotationData, usable){
+  function renderReport(dateAgg, flagIssues, annotationPerFile, usable){
     reportArea.innerHTML = '';
 
     // ---- Section 1: Daily volume ----
@@ -664,56 +663,61 @@
     }
     reportArea.appendChild(sec2);
 
-    // ---- Section 3: Highest annotation count per project ----
+    // ---- Section 3: Top annotated image links per file ----
     const sec3 = document.createElement('section');
     sec3.className = 'report';
-    sec3.innerHTML = '<h2>Highest annotation count per project</h2><p class="desc">The single row with the most annotations for each project, with a link to that annotated image.</p>';
+    sec3.innerHTML = '<h2>Top annotated image links, per file</h2><p class="desc">Each file\'s rows sorted by annotation count, highest to lowest — the top 25 image links per file (all of them if a file has fewer than 20 annotated rows).</p>';
 
-    const topRows = Object.values(topAnnotation).sort((a,b) => {
-      if (a.country !== b.country) return a.country.localeCompare(b.country);
-      return a.project.localeCompare(b.project);
-    });
+    const withData = annotationPerFile.filter(f => f.hasData);
+    const withoutData = annotationPerFile.filter(f => !f.hasData);
 
-    if (topRows.length === 0){
-      sec3.innerHTML += '<p class="empty-note">None of the uploaded files have both an annotation count and an image-link column, so this report has nothing to show.</p>';
+    if (withData.length === 0){
+      sec3.innerHTML += '<p class="empty-note">None of the uploaded files have both an annotation-count column and an image-link column, so this report has nothing to show.</p>';
     } else {
+      const allCsvRows = [];
+      withData.forEach(f => f.rows.forEach((r,i) => allCsvRows.push([
+        f.country, f.fileName, i+1, r.date || '', r.shopId ?? '', r.shopName ?? '', r.annotationCount, r.imageLink ?? ''
+      ])));
+
       const toolbar = document.createElement('div');
       toolbar.className = 'table-toolbar';
       const dlBtn = document.createElement('button');
       dlBtn.textContent = 'Download CSV';
       dlBtn.addEventListener('click', () => downloadCSV(
-        ['Country','Project','Date','Shop ID','Shop Name','Annotation Count','Image Link'],
-        topRows.map(r => [r.country, r.project, r.date, r.shopId ?? '', r.shopName ?? '', r.annotationCount, r.imageLink ?? '']),
-        'top_annotation_count_per_project.csv'
+        ['Country','File','Rank','Date','Shop ID','Shop Name','Annotation Count','Image Link'],
+        allCsvRows,
+        'top_annotated_image_links.csv'
       ));
       toolbar.appendChild(dlBtn);
       sec3.appendChild(toolbar);
 
-      const table = document.createElement('table');
-      let body = '<thead><tr><th>Country</th><th>Project</th><th>Date</th><th>Shop ID</th><th>Shop Name</th><th class="num">Annotation Count</th><th>Image Link</th></tr></thead><tbody>';
-      topRows.forEach(r => {
-        const linkCell = r.imageLink
-          ? `<a href="${escapeHtml(r.imageLink)}" target="_blank" rel="noopener noreferrer">Open image</a>`
-          : '—';
-        body += `<tr>
-          <td><span class="country-tag">${escapeHtml(r.country)}</span></td>
-          <td>${escapeHtml(r.project)}</td>
-          <td>${r.date || '—'}</td>
-          <td>${escapeHtml(r.shopId ?? '—')}</td>
-          <td>${escapeHtml(r.shopName || '—')}</td>
-          <td class="num">${r.annotationCount}</td>
-          <td>${linkCell}</td>
-        </tr>`;
+      withData.forEach(f => {
+        const block = document.createElement('div');
+        block.className = 'flag-issue-block';
+        let body = `<div style="margin-bottom:8px;"><span class="country-tag">${escapeHtml(f.country)}</span> <span style="color:var(--muted); font-size:13px; margin-left:6px;">${escapeHtml(f.fileName)} — top ${f.rows.length} of its annotated rows</span></div>`;
+        body += '<table><thead><tr><th class="num">Rank</th><th>Date</th><th>Shop ID</th><th>Shop Name</th><th class="num">Annotation Count</th><th>Image Link</th></tr></thead><tbody>';
+        f.rows.forEach((r, i) => {
+          const linkCell = r.imageLink
+            ? `<a href="${escapeHtml(r.imageLink)}" target="_blank" rel="noopener noreferrer">Open image</a>`
+            : '—';
+          body += `<tr>
+            <td class="num">${i+1}</td>
+            <td>${r.date || '—'}</td>
+            <td>${escapeHtml(r.shopId ?? '—')}</td>
+            <td>${escapeHtml(r.shopName || '—')}</td>
+            <td class="num">${r.annotationCount}</td>
+            <td>${linkCell}</td>
+          </tr>`;
+        });
+        body += '</tbody>';
+        block.innerHTML = body;
+        sec3.appendChild(block);
       });
-      body += '</tbody>';
-      table.innerHTML = body;
-      sec3.appendChild(table);
 
-      const skipped = [...new Set(noAnnotationData)];
-      if (skipped.length){
+      if (withoutData.length){
         const note = document.createElement('p');
         note.className = 'empty-note';
-        note.textContent = 'No annotation-count / image-link columns found for: ' + skipped.join(', ') + ' — skipped for this report.';
+        note.textContent = 'No annotation-count / image-link columns found in: ' + withoutData.map(f => f.fileName).join(', ') + ' — skipped for this report.';
         sec3.appendChild(note);
       }
     }
