@@ -394,6 +394,9 @@
       tagger: find(['tagger']),
       username: find(['username']),
       appVersion: find(['appversion']),
+      projectName: find(['projectname']),
+      annotationCount: find(['annotationcount']),
+      imageLink: find(['imagelinkwithannotations','imagelink']),
     };
   }
 
@@ -487,11 +490,17 @@
     // per-date aggregation: key = country|date
     const dateAgg = {}; // { 'Country|2026-08-24': {country, date, stores:Set, images:0} }
     const flagIssues = []; // rows where analytics flag == 0
+    const topAnnotation = {}; // { 'Country|Project': best row so far }
+    const noAnnotationData = []; // countries/files with no annotation-count column at all
 
     usable.forEach(entry => {
       const cm = entry.colMap;
       const usesPerRowImages = cm.imagesCol !== -1;      // Portugal-style
       const usesRowAsImage = !usesPerRowImages && cm.totalImagesCol !== -1; // Czechia-style
+
+      if (cm.annotationCount === -1 || cm.imageLink === -1){
+        noAnnotationData.push(entry.country);
+      }
 
       entry.rows.forEach(r => {
         const dateRaw = cm.date !== -1 ? r[cm.date] : null;
@@ -529,13 +538,35 @@
             tagger: cm.tagger !== -1 ? r[cm.tagger] : (cm.username !== -1 ? r[cm.username] : null),
           });
         }
+
+        // track highest annotation count per project (falls back to per-country if no project column)
+        if (cm.annotationCount !== -1 && cm.imageLink !== -1){
+          const annotVal = r[cm.annotationCount];
+          const annotNum = (typeof annotVal === 'number') ? annotVal : parseFloat(annotVal);
+          if (!isNaN(annotNum)){
+            const projectName = cm.projectName !== -1 ? (r[cm.projectName] || entry.country) : entry.country;
+            const key = entry.country + '|' + projectName;
+            const current = topAnnotation[key];
+            if (!current || annotNum > current.annotationCount){
+              topAnnotation[key] = {
+                country: entry.country,
+                project: projectName,
+                date: dateKey,
+                shopId: shopId,
+                shopName: shopName,
+                annotationCount: annotNum,
+                imageLink: r[cm.imageLink],
+              };
+            }
+          }
+        }
       });
     });
 
-    renderReport(dateAgg, flagIssues, usable);
+    renderReport(dateAgg, flagIssues, topAnnotation, noAnnotationData, usable);
   }
 
-  function renderReport(dateAgg, flagIssues, usable){
+  function renderReport(dateAgg, flagIssues, topAnnotation, noAnnotationData, usable){
     reportArea.innerHTML = '';
 
     // ---- Section 1: Daily volume ----
@@ -632,6 +663,61 @@
       });
     }
     reportArea.appendChild(sec2);
+
+    // ---- Section 3: Highest annotation count per project ----
+    const sec3 = document.createElement('section');
+    sec3.className = 'report';
+    sec3.innerHTML = '<h2>Highest annotation count per project</h2><p class="desc">The single row with the most annotations for each project, with a link to that annotated image.</p>';
+
+    const topRows = Object.values(topAnnotation).sort((a,b) => {
+      if (a.country !== b.country) return a.country.localeCompare(b.country);
+      return a.project.localeCompare(b.project);
+    });
+
+    if (topRows.length === 0){
+      sec3.innerHTML += '<p class="empty-note">None of the uploaded files have both an annotation count and an image-link column, so this report has nothing to show.</p>';
+    } else {
+      const toolbar = document.createElement('div');
+      toolbar.className = 'table-toolbar';
+      const dlBtn = document.createElement('button');
+      dlBtn.textContent = 'Download CSV';
+      dlBtn.addEventListener('click', () => downloadCSV(
+        ['Country','Project','Date','Shop ID','Shop Name','Annotation Count','Image Link'],
+        topRows.map(r => [r.country, r.project, r.date, r.shopId ?? '', r.shopName ?? '', r.annotationCount, r.imageLink ?? '']),
+        'top_annotation_count_per_project.csv'
+      ));
+      toolbar.appendChild(dlBtn);
+      sec3.appendChild(toolbar);
+
+      const table = document.createElement('table');
+      let body = '<thead><tr><th>Country</th><th>Project</th><th>Date</th><th>Shop ID</th><th>Shop Name</th><th class="num">Annotation Count</th><th>Image Link</th></tr></thead><tbody>';
+      topRows.forEach(r => {
+        const linkCell = r.imageLink
+          ? `<a href="${escapeHtml(r.imageLink)}" target="_blank" rel="noopener noreferrer">Open image</a>`
+          : '—';
+        body += `<tr>
+          <td><span class="country-tag">${escapeHtml(r.country)}</span></td>
+          <td>${escapeHtml(r.project)}</td>
+          <td>${r.date || '—'}</td>
+          <td>${escapeHtml(r.shopId ?? '—')}</td>
+          <td>${escapeHtml(r.shopName || '—')}</td>
+          <td class="num">${r.annotationCount}</td>
+          <td>${linkCell}</td>
+        </tr>`;
+      });
+      body += '</tbody>';
+      table.innerHTML = body;
+      sec3.appendChild(table);
+
+      const skipped = [...new Set(noAnnotationData)];
+      if (skipped.length){
+        const note = document.createElement('p');
+        note.className = 'empty-note';
+        note.textContent = 'No annotation-count / image-link columns found for: ' + skipped.join(', ') + ' — skipped for this report.';
+        sec3.appendChild(note);
+      }
+    }
+    reportArea.appendChild(sec3);
   }
 
   function escapeHtml(v){
