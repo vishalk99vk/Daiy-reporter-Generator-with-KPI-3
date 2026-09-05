@@ -7,6 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <style>
   :root{
     --bg: #F7F6F2;
@@ -253,6 +255,96 @@
   }
   .table-toolbar button:hover{color:var(--ink); border-color:#B9B6AC;}
 
+  .sync-bar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:10px 14px;
+    font-size:12.5px;
+    color:var(--muted);
+    margin-bottom:20px;
+  }
+  .sync-bar .dot{
+    display:inline-block;
+    width:7px;
+    height:7px;
+    border-radius:50%;
+    margin-right:6px;
+  }
+  .dot.on{background:#3E6B37;}
+  .dot.off{background:#B9B6AC;}
+
+  .history-panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    margin-bottom:24px;
+    overflow:hidden;
+  }
+  .history-panel summary{
+    padding:12px 14px;
+    cursor:pointer;
+    font-size:13.5px;
+    font-weight:500;
+    list-style:none;
+  }
+  .history-panel summary::-webkit-details-marker{display:none;}
+  .history-panel summary::before{content:'▸ '; color:var(--muted);}
+  .history-panel[open] summary::before{content:'▾ '; }
+  .history-list{
+    border-top:1px solid var(--line);
+  }
+  .history-item{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding:9px 14px;
+    font-size:13px;
+    border-bottom:1px solid #EFEEE9;
+  }
+  .history-item:last-child{border-bottom:none;}
+  .history-item .h-meta{color:var(--muted); font-size:12px;}
+  .history-item button{
+    font-family:inherit;
+    font-size:12px;
+    background:transparent;
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:5px 10px;
+    cursor:pointer;
+    color:var(--ink);
+    white-space:nowrap;
+  }
+  .history-item button:hover{border-color:var(--accent); color:var(--accent);}
+
+  .viewing-banner{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    background:#F0F4F3;
+    border:1px solid #CFDEDC;
+    border-radius:var(--radius);
+    padding:10px 14px;
+    font-size:13px;
+    margin-bottom:24px;
+  }
+  .viewing-banner button{
+    font-family:inherit;
+    font-size:12.5px;
+    background:transparent;
+    border:1px solid #B9C7C6;
+    border-radius:var(--radius);
+    padding:5px 11px;
+    cursor:pointer;
+    color:var(--accent);
+  }
+
   .hidden{display:none !important;}
 
   ::selection{background:#CFE0DD;}
@@ -265,6 +357,17 @@
     <h1>Store &amp; Image Volume Report</h1>
     <p>Upload the country tagging/volume files. It reads each file, works out which country it belongs to, and builds the per-date store/image counts and a list of any rows with analytics flag 0 — combined across every file you drop in.</p>
   </header>
+
+  <div class="sync-bar" id="syncBar">
+    <span><span class="dot off" id="syncDot"></span><span id="syncText">Checking history sync…</span></span>
+  </div>
+
+  <details class="history-panel" id="historyPanel">
+    <summary>Run history</summary>
+    <div class="history-list" id="historyList">
+      <div class="history-item"><span class="h-meta">No history loaded yet.</span></div>
+    </div>
+  </details>
 
   <div class="dropzone" id="dropzone">
     <input type="file" id="fileInput" multiple accept=".xlsx,.xls">
@@ -279,6 +382,7 @@
     <button class="ghost" id="clearBtn">Clear all</button>
   </div>
 
+  <div id="viewingBanner"></div>
   <div id="reportArea"></div>
 
 </div>
@@ -286,9 +390,71 @@
 <script>
 (function(){
 
+  // ======================================================================
+  // FIREBASE SETUP — fill this in to enable shared run history on GitHub Pages.
+  //
+  // 1. Go to https://console.firebase.google.com → create a free project.
+  // 2. Build → Realtime Database → Create Database → start in "test mode"
+  //    (or use the rules below for a slightly safer public read / open write setup).
+  // 3. Project settings → General → "Your apps" → Web app → copy the config
+  //    object below.
+  // 4. Realtime Database → Rules, and paste:
+  //      {
+  //        "rules": {
+  //          "runs": {
+  //            ".read": true,
+  //            ".write": true
+  //          }
+  //        }
+  //      }
+  //    NOTE: this makes the data (shop names, image links, counts saved from
+  //    every run) publicly readable AND writable by anyone who has this page's
+  //    URL, since a static GitHub Pages site has no server to hide a secret
+  //    key behind. Don't save data here that shouldn't be public. If you need
+  //    real write protection, put Firebase Auth + rules keyed to a signed-in
+  //    user in front of this instead of leaving it open.
+  // 5. Paste your config into FIREBASE_CONFIG below and re-deploy the file.
+  // If FIREBASE_CONFIG is left as-is (apiKey still says "PASTE_YOUR_KEY_HERE"),
+  // the tool runs in local-only mode: reports still build normally, they just
+  // won't be saved or shared with other visitors.
+  // ======================================================================
+  const FIREBASE_CONFIG = {
+    apiKey: "PASTE_YOUR_KEY_HERE",
+    authDomain: "YOUR_PROJECT.firebaseapp.com",
+    databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
+    projectId: "YOUR_PROJECT",
+  };
+  const HISTORY_LIMIT = 20;
+
+  let db = null;
+  let firebaseReady = false;
+
+  function initFirebase(){
+    const syncDot = document.getElementById('syncDot');
+    const syncText = document.getElementById('syncText');
+    if (!FIREBASE_CONFIG.apiKey || FIREBASE_CONFIG.apiKey === 'PASTE_YOUR_KEY_HERE'){
+      syncDot.className = 'dot off';
+      syncText.textContent = 'History sync not configured — see the FIREBASE_CONFIG comment near the top of this file. Reports still build normally, just locally.';
+      return;
+    }
+    try{
+      firebase.initializeApp(FIREBASE_CONFIG);
+      db = firebase.database();
+      firebaseReady = true;
+      syncDot.className = 'dot on';
+      syncText.textContent = 'History sync is on — runs are saved and visible to anyone who opens this page.';
+      loadHistoryList();
+      loadLatestRunIfIdle();
+    } catch(err){
+      syncDot.className = 'dot off';
+      syncText.textContent = 'Could not connect to history sync (' + (err.message || err) + '). Reports still build locally.';
+    }
+  }
+
   // ---------- state ----------
   let entries = []; // { id, file, name, country, workbook, sheetName, headers, rows, colMap, parseError }
   let idCounter = 0;
+  let userHasBuiltThisSession = false;
 
   const dropzone = document.getElementById('dropzone');
   const fileInput = document.getElementById('fileInput');
@@ -296,6 +462,8 @@
   const buildBtn = document.getElementById('buildBtn');
   const clearBtn = document.getElementById('clearBtn');
   const reportArea = document.getElementById('reportArea');
+  const viewingBanner = document.getElementById('viewingBanner');
+  const historyList = document.getElementById('historyList');
 
   dropzone.addEventListener('click', () => fileInput.click());
   dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
@@ -310,8 +478,11 @@
     entries = [];
     renderFileList();
     reportArea.innerHTML = '';
+    viewingBanner.innerHTML = '';
     fileInput.value = '';
   });
+
+  initFirebase();
 
   function handleFiles(fileArr){
     Array.from(fileArr).forEach(file => {
@@ -562,10 +733,32 @@
       });
     });
 
-    renderReport(dateAgg, flagIssues, annotationPerFile, usable);
+    renderReport(dailyVolumeRows(dateAgg), flagIssues, annotationPerFile, usable.map(e => ({name:e.name, country:e.country})));
+
+    if (firebaseReady){
+      saveRun({
+        timestamp: Date.now(),
+        files: usable.map(e => ({name:e.name, country:e.country})),
+        dailyVolume: dailyVolumeRows(dateAgg),
+        flagIssues: flagIssues,
+        annotationPerFile: annotationPerFile,
+      });
+    }
+    userHasBuiltThisSession = true;
+    viewingBanner.innerHTML = '';
   }
 
-  function renderReport(dateAgg, flagIssues, annotationPerFile, usable){
+  function dailyVolumeRows(dateAgg){
+    // Convert the Set-based aggregation into plain, JSON-safe rows.
+    return Object.values(dateAgg).map(r => ({
+      country: r.country,
+      date: r.date,
+      storesCount: r.stores.size,
+      images: r.images,
+    }));
+  }
+
+  function renderReport(dailyVolume, flagIssues, annotationPerFile, fileMeta){
     reportArea.innerHTML = '';
 
     // ---- Section 1: Daily volume ----
@@ -573,7 +766,7 @@
     sec1.className = 'report';
     sec1.innerHTML = '<h2>Daily store &amp; image volume</h2><p class="desc">Distinct stores and total images tagged per date, grouped by country.</p>';
 
-    const rows = Object.values(dateAgg).sort((a,b) => {
+    const rows = dailyVolume.slice().sort((a,b) => {
       if (a.country !== b.country) return a.country.localeCompare(b.country);
       return a.date.localeCompare(b.date);
     });
@@ -587,22 +780,18 @@
       dlBtn.textContent = 'Download CSV';
       dlBtn.addEventListener('click', () => downloadCSV(
         ['Country','Date','Stores','Images'],
-        rows.map(r => [r.country, r.date, r.stores.size, r.images]),
+        rows.map(r => [r.country, r.date, r.storesCount, r.images]),
         'daily_store_image_volume.csv'
       ));
       toolbar.appendChild(dlBtn);
       sec1.appendChild(toolbar);
 
       const table = document.createElement('table');
-      const totalsByCountry = {};
-      let grandStores = 0, grandImages = 0;
+      let grandImages = 0;
 
       let body = '<thead><tr><th>Country</th><th>Date</th><th class="num">Stores</th><th class="num">Images</th></tr></thead><tbody>';
       rows.forEach(r => {
-        body += `<tr><td><span class="country-tag">${escapeHtml(r.country)}</span></td><td>${r.date}</td><td class="num">${r.stores.size}</td><td class="num">${r.images}</td></tr>`;
-        totalsByCountry[r.country] = totalsByCountry[r.country] || {stores:0, images:0};
-        totalsByCountry[r.country].stores += r.stores.size;
-        totalsByCountry[r.country].images += r.images;
+        body += `<tr><td><span class="country-tag">${escapeHtml(r.country)}</span></td><td>${r.date}</td><td class="num">${r.storesCount}</td><td class="num">${r.images}</td></tr>`;
         grandImages += r.images;
       });
       // grand total row for images (store totals aren't summed across dates meaningfully as "unique", so we sum row counts as a volume indicator)
@@ -749,6 +938,77 @@
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  }
+
+  // ---------- run history (Firebase Realtime Database) ----------
+
+  function saveRun(snapshot){
+    db.ref('runs').push(snapshot).catch(err => {
+      console.error('Could not save run history:', err);
+    });
+  }
+
+  function formatTimestamp(ts){
+    try{
+      return new Date(ts).toLocaleString();
+    } catch(e){
+      return String(ts);
+    }
+  }
+
+  function loadHistoryList(){
+    if (!firebaseReady) return;
+    db.ref('runs').orderByChild('timestamp').limitToLast(HISTORY_LIMIT).once('value')
+      .then(snap => {
+        const val = snap.val();
+        historyList.innerHTML = '';
+        if (!val){
+          historyList.innerHTML = '<div class="history-item"><span class="h-meta">No runs saved yet — build a report to start the history.</span></div>';
+          return;
+        }
+        const runs = Object.keys(val).map(key => Object.assign({ key }, val[key]));
+        runs.sort((a,b) => b.timestamp - a.timestamp);
+        runs.forEach(run => {
+          const item = document.createElement('div');
+          item.className = 'history-item';
+          const fileNames = (run.files || []).map(f => f.name).join(', ') || 'unnamed files';
+          const meta = document.createElement('span');
+          meta.className = 'h-meta';
+          meta.textContent = formatTimestamp(run.timestamp) + ' — ' + fileNames;
+          const viewBtn = document.createElement('button');
+          viewBtn.textContent = 'View';
+          viewBtn.addEventListener('click', () => loadRunIntoView(run));
+          item.appendChild(meta);
+          item.appendChild(viewBtn);
+          historyList.appendChild(item);
+        });
+      })
+      .catch(err => {
+        historyList.innerHTML = '<div class="history-item"><span class="h-meta">Could not load history: ' + escapeHtml(err.message || err) + '</span></div>';
+      });
+  }
+
+  function loadLatestRunIfIdle(){
+    if (!firebaseReady || userHasBuiltThisSession) return;
+    db.ref('runs').orderByChild('timestamp').limitToLast(1).once('value')
+      .then(snap => {
+        if (userHasBuiltThisSession) return; // user started their own upload while this was loading
+        const val = snap.val();
+        if (!val) return;
+        const run = Object.values(val)[0];
+        loadRunIntoView(run);
+      })
+      .catch(() => { /* silent — local mode still works */ });
+  }
+
+  function loadRunIntoView(run){
+    renderReport(run.dailyVolume || [], run.flagIssues || [], run.annotationPerFile || [], run.files || []);
+    const fileNames = (run.files || []).map(f => f.name).join(', ') || 'unnamed files';
+    viewingBanner.innerHTML = '';
+    const banner = document.createElement('div');
+    banner.className = 'viewing-banner';
+    banner.innerHTML = `<span>Showing the last saved run from <strong>${escapeHtml(formatTimestamp(run.timestamp))}</strong> (${escapeHtml(fileNames)}). Upload your own files above to run a fresh report.</span>`;
+    viewingBanner.appendChild(banner);
   }
 
 })();
