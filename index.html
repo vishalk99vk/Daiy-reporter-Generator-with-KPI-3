@@ -7,8 +7,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <style>
   :root{
     --bg: #F7F6F2;
@@ -227,6 +225,27 @@
     color:var(--accent);
   }
 
+  tbody tr.missing-row td{
+    background:var(--warn-bg);
+  }
+  tbody tr.missing-row td.num{
+    color:var(--warn-ink);
+    font-weight:600;
+  }
+  .no-data-tag{
+    display:inline-block;
+    font-size:10.5px;
+    font-weight:600;
+    letter-spacing:.02em;
+    text-transform:uppercase;
+    padding:1px 6px;
+    border-radius:8px;
+    background:var(--warn-bg);
+    border:1px solid var(--warn-line);
+    color:var(--warn-ink);
+    margin-left:6px;
+  }
+
   .empty-note{
     color:var(--muted);
     font-size:13.5px;
@@ -255,96 +274,6 @@
   }
   .table-toolbar button:hover{color:var(--ink); border-color:#B9B6AC;}
 
-  .sync-bar{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:12px;
-    background:var(--panel);
-    border:1px solid var(--line);
-    border-radius:var(--radius);
-    padding:10px 14px;
-    font-size:12.5px;
-    color:var(--muted);
-    margin-bottom:20px;
-  }
-  .sync-bar .dot{
-    display:inline-block;
-    width:7px;
-    height:7px;
-    border-radius:50%;
-    margin-right:6px;
-  }
-  .dot.on{background:#3E6B37;}
-  .dot.off{background:#B9B6AC;}
-
-  .history-panel{
-    background:var(--panel);
-    border:1px solid var(--line);
-    border-radius:var(--radius);
-    margin-bottom:24px;
-    overflow:hidden;
-  }
-  .history-panel summary{
-    padding:12px 14px;
-    cursor:pointer;
-    font-size:13.5px;
-    font-weight:500;
-    list-style:none;
-  }
-  .history-panel summary::-webkit-details-marker{display:none;}
-  .history-panel summary::before{content:'▸ '; color:var(--muted);}
-  .history-panel[open] summary::before{content:'▾ '; }
-  .history-list{
-    border-top:1px solid var(--line);
-  }
-  .history-item{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:10px;
-    padding:9px 14px;
-    font-size:13px;
-    border-bottom:1px solid #EFEEE9;
-  }
-  .history-item:last-child{border-bottom:none;}
-  .history-item .h-meta{color:var(--muted); font-size:12px;}
-  .history-item button{
-    font-family:inherit;
-    font-size:12px;
-    background:transparent;
-    border:1px solid var(--line);
-    border-radius:var(--radius);
-    padding:5px 10px;
-    cursor:pointer;
-    color:var(--ink);
-    white-space:nowrap;
-  }
-  .history-item button:hover{border-color:var(--accent); color:var(--accent);}
-
-  .viewing-banner{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:12px;
-    background:#F0F4F3;
-    border:1px solid #CFDEDC;
-    border-radius:var(--radius);
-    padding:10px 14px;
-    font-size:13px;
-    margin-bottom:24px;
-  }
-  .viewing-banner button{
-    font-family:inherit;
-    font-size:12.5px;
-    background:transparent;
-    border:1px solid #B9C7C6;
-    border-radius:var(--radius);
-    padding:5px 11px;
-    cursor:pointer;
-    color:var(--accent);
-  }
-
   .hidden{display:none !important;}
 
   ::selection{background:#CFE0DD;}
@@ -357,17 +286,6 @@
     <h1>Store &amp; Image Volume Report</h1>
     <p>Upload the country tagging/volume files. It reads each file, works out which country it belongs to, and builds the per-date store/image counts and a list of any rows with analytics flag 0 — combined across every file you drop in.</p>
   </header>
-
-  <div class="sync-bar" id="syncBar">
-    <span><span class="dot off" id="syncDot"></span><span id="syncText">Checking history sync…</span></span>
-  </div>
-
-  <details class="history-panel" id="historyPanel">
-    <summary>Run history</summary>
-    <div class="history-list" id="historyList">
-      <div class="history-item"><span class="h-meta">No history loaded yet.</span></div>
-    </div>
-  </details>
 
   <div class="dropzone" id="dropzone">
     <input type="file" id="fileInput" multiple accept=".xlsx,.xls">
@@ -382,7 +300,6 @@
     <button class="ghost" id="clearBtn">Clear all</button>
   </div>
 
-  <div id="viewingBanner"></div>
   <div id="reportArea"></div>
 
 </div>
@@ -390,71 +307,9 @@
 <script>
 (function(){
 
-  // ======================================================================
-  // FIREBASE SETUP — fill this in to enable shared run history on GitHub Pages.
-  //
-  // 1. Go to https://console.firebase.google.com → create a free project.
-  // 2. Build → Realtime Database → Create Database → start in "test mode"
-  //    (or use the rules below for a slightly safer public read / open write setup).
-  // 3. Project settings → General → "Your apps" → Web app → copy the config
-  //    object below.
-  // 4. Realtime Database → Rules, and paste:
-  //      {
-  //        "rules": {
-  //          "runs": {
-  //            ".read": true,
-  //            ".write": true
-  //          }
-  //        }
-  //      }
-  //    NOTE: this makes the data (shop names, image links, counts saved from
-  //    every run) publicly readable AND writable by anyone who has this page's
-  //    URL, since a static GitHub Pages site has no server to hide a secret
-  //    key behind. Don't save data here that shouldn't be public. If you need
-  //    real write protection, put Firebase Auth + rules keyed to a signed-in
-  //    user in front of this instead of leaving it open.
-  // 5. Paste your config into FIREBASE_CONFIG below and re-deploy the file.
-  // If FIREBASE_CONFIG is left as-is (apiKey still says "PASTE_YOUR_KEY_HERE"),
-  // the tool runs in local-only mode: reports still build normally, they just
-  // won't be saved or shared with other visitors.
-  // ======================================================================
-  const FIREBASE_CONFIG = {
-    apiKey: "PASTE_YOUR_KEY_HERE",
-    authDomain: "YOUR_PROJECT.firebaseapp.com",
-    databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
-    projectId: "YOUR_PROJECT",
-  };
-  const HISTORY_LIMIT = 20;
-
-  let db = null;
-  let firebaseReady = false;
-
-  function initFirebase(){
-    const syncDot = document.getElementById('syncDot');
-    const syncText = document.getElementById('syncText');
-    if (!FIREBASE_CONFIG.apiKey || FIREBASE_CONFIG.apiKey === 'PASTE_YOUR_KEY_HERE'){
-      syncDot.className = 'dot off';
-      syncText.textContent = 'History sync not configured — see the FIREBASE_CONFIG comment near the top of this file. Reports still build normally, just locally.';
-      return;
-    }
-    try{
-      firebase.initializeApp(FIREBASE_CONFIG);
-      db = firebase.database();
-      firebaseReady = true;
-      syncDot.className = 'dot on';
-      syncText.textContent = 'History sync is on — runs are saved and visible to anyone who opens this page.';
-      loadHistoryList();
-      loadLatestRunIfIdle();
-    } catch(err){
-      syncDot.className = 'dot off';
-      syncText.textContent = 'Could not connect to history sync (' + (err.message || err) + '). Reports still build locally.';
-    }
-  }
-
   // ---------- state ----------
   let entries = []; // { id, file, name, country, workbook, sheetName, headers, rows, colMap, parseError }
   let idCounter = 0;
-  let userHasBuiltThisSession = false;
 
   const dropzone = document.getElementById('dropzone');
   const fileInput = document.getElementById('fileInput');
@@ -462,8 +317,6 @@
   const buildBtn = document.getElementById('buildBtn');
   const clearBtn = document.getElementById('clearBtn');
   const reportArea = document.getElementById('reportArea');
-  const viewingBanner = document.getElementById('viewingBanner');
-  const historyList = document.getElementById('historyList');
 
   dropzone.addEventListener('click', () => fileInput.click());
   dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
@@ -478,11 +331,8 @@
     entries = [];
     renderFileList();
     reportArea.innerHTML = '';
-    viewingBanner.innerHTML = '';
     fileInput.value = '';
   });
-
-  initFirebase();
 
   function handleFiles(fileArr){
     Array.from(fileArr).forEach(file => {
@@ -565,8 +415,6 @@
       tagger: find(['tagger']),
       username: find(['username']),
       appVersion: find(['appversion']),
-      annotationCount: find(['annotationcount']),
-      imageLink: find(['imagelinkwithannotations','imagelink']),
     };
   }
 
@@ -650,6 +498,27 @@
     return s === '0';
   }
 
+  // Pull the "from YYYY-MM-DD to YYYY-MM-DD" range out of a filename like
+  // "BAT_UK_-_Integration_from_2026-08-29_to_2026-09-04_-_tagging_kpi_report_3.xlsx"
+  function parseFilenameRange(filename){
+    const m = filename.match(/from[_\s-]*(\d{4}-\d{2}-\d{2})[_\s-]*to[_\s-]*(\d{4}-\d{2}-\d{2})/i);
+    if (!m) return null;
+    return { start: m[1], end: m[2] };
+  }
+
+  // Inclusive list of YYYY-MM-DD date strings from start to end (UTC-based, no DST issues)
+  function dateRangeArray(startStr, endStr){
+    const out = [];
+    let d = new Date(startStr + 'T00:00:00Z');
+    const end = new Date(endStr + 'T00:00:00Z');
+    if (isNaN(d) || isNaN(end)) return out;
+    while (d <= end){
+      out.push(d.toISOString().slice(0,10));
+      d.setUTCDate(d.getUTCDate() + 1);
+    }
+    return out;
+  }
+
   function buildReport(){
     const usable = entries.filter(e => e.ready && !e.parseError);
     if (usable.length === 0){
@@ -660,39 +529,11 @@
     // per-date aggregation: key = country|date
     const dateAgg = {}; // { 'Country|2026-08-24': {country, date, stores:Set, images:0} }
     const flagIssues = []; // rows where analytics flag == 0
-    const annotationPerFile = []; // one entry per uploaded file: { country, fileName, hasData, rows: [...] }
-    const TOP_N = 25;
 
     usable.forEach(entry => {
       const cm = entry.colMap;
       const usesPerRowImages = cm.imagesCol !== -1;      // Portugal-style
       const usesRowAsImage = !usesPerRowImages && cm.totalImagesCol !== -1; // Czechia-style
-
-      // ---- annotation-count / image-link report for this file ----
-      const fileAnnotRows = [];
-      if (cm.annotationCount !== -1 && cm.imageLink !== -1){
-        entry.rows.forEach(r => {
-          const annotVal = r[cm.annotationCount];
-          const annotNum = (typeof annotVal === 'number') ? annotVal : parseFloat(annotVal);
-          const link = r[cm.imageLink];
-          if (!isNaN(annotNum) && link){
-            fileAnnotRows.push({
-              annotationCount: annotNum,
-              imageLink: link,
-              date: toDateKey(cm.date !== -1 ? r[cm.date] : null),
-              shopId: cm.shopId !== -1 ? r[cm.shopId] : (cm.shopIdAlt !== -1 ? r[cm.shopIdAlt] : null),
-              shopName: cm.shopName !== -1 ? r[cm.shopName] : null,
-            });
-          }
-        });
-        fileAnnotRows.sort((a,b) => b.annotationCount - a.annotationCount);
-      }
-      annotationPerFile.push({
-        country: entry.country,
-        fileName: entry.name,
-        hasData: cm.annotationCount !== -1 && cm.imageLink !== -1,
-        rows: fileAnnotRows.slice(0, TOP_N), // top 25, or all of them if fewer than that exist
-      });
 
       entry.rows.forEach(r => {
         const dateRaw = cm.date !== -1 ? r[cm.date] : null;
@@ -733,40 +574,42 @@
       });
     });
 
-    renderReport(dailyVolumeRows(dateAgg), flagIssues, annotationPerFile, usable.map(e => ({name:e.name, country:e.country})));
+    // ---- fill gaps: every country should show every date in the reported
+    // window, even if that country had zero rows for that date ----
+    const filenameRanges = usable.map(e => parseFilenameRange(e.name)).filter(Boolean);
+    const actualDates = Object.values(dateAgg).map(r => r.date);
+    const boundaryDates = actualDates.concat(
+      filenameRanges.flatMap(r => [r.start, r.end])
+    );
 
-    if (firebaseReady){
-      saveRun({
-        timestamp: Date.now(),
-        files: usable.map(e => ({name:e.name, country:e.country})),
-        dailyVolume: dailyVolumeRows(dateAgg),
-        flagIssues: flagIssues,
-        annotationPerFile: annotationPerFile,
+    if (boundaryDates.length > 0){
+      const minDate = boundaryDates.reduce((a,b) => a < b ? a : b);
+      const maxDate = boundaryDates.reduce((a,b) => a > b ? a : b);
+      const fullDates = dateRangeArray(minDate, maxDate);
+      const countries = [...new Set(usable.map(e => e.country))];
+
+      countries.forEach(country => {
+        fullDates.forEach(date => {
+          const key = country + '|' + date;
+          if (!dateAgg[key]){
+            dateAgg[key] = { country, date, stores: new Set(), images: 0, missing: true };
+          }
+        });
       });
     }
-    userHasBuiltThisSession = true;
-    viewingBanner.innerHTML = '';
+
+    renderReport(dateAgg, flagIssues, usable);
   }
 
-  function dailyVolumeRows(dateAgg){
-    // Convert the Set-based aggregation into plain, JSON-safe rows.
-    return Object.values(dateAgg).map(r => ({
-      country: r.country,
-      date: r.date,
-      storesCount: r.stores.size,
-      images: r.images,
-    }));
-  }
-
-  function renderReport(dailyVolume, flagIssues, annotationPerFile, fileMeta){
+  function renderReport(dateAgg, flagIssues, usable){
     reportArea.innerHTML = '';
 
     // ---- Section 1: Daily volume ----
     const sec1 = document.createElement('section');
     sec1.className = 'report';
-    sec1.innerHTML = '<h2>Daily store &amp; image volume</h2><p class="desc">Distinct stores and total images tagged per date, grouped by country.</p>';
+    sec1.innerHTML = '<h2>Daily store &amp; image volume</h2><p class="desc">Distinct stores and total images tagged per date, grouped by country. Rows highlighted in red show 0 because that country had no data for that date within the reported window.</p>';
 
-    const rows = dailyVolume.slice().sort((a,b) => {
+    const rows = Object.values(dateAgg).sort((a,b) => {
       if (a.country !== b.country) return a.country.localeCompare(b.country);
       return a.date.localeCompare(b.date);
     });
@@ -780,18 +623,24 @@
       dlBtn.textContent = 'Download CSV';
       dlBtn.addEventListener('click', () => downloadCSV(
         ['Country','Date','Stores','Images'],
-        rows.map(r => [r.country, r.date, r.storesCount, r.images]),
+        rows.map(r => [r.country, r.date, r.stores.size, r.images]),
         'daily_store_image_volume.csv'
       ));
       toolbar.appendChild(dlBtn);
       sec1.appendChild(toolbar);
 
       const table = document.createElement('table');
-      let grandImages = 0;
+      const totalsByCountry = {};
+      let grandStores = 0, grandImages = 0;
 
       let body = '<thead><tr><th>Country</th><th>Date</th><th class="num">Stores</th><th class="num">Images</th></tr></thead><tbody>';
       rows.forEach(r => {
-        body += `<tr><td><span class="country-tag">${escapeHtml(r.country)}</span></td><td>${r.date}</td><td class="num">${r.storesCount}</td><td class="num">${r.images}</td></tr>`;
+        const rowClass = r.missing ? ' class="missing-row"' : '';
+        const noDataTag = r.missing ? ' <span class="no-data-tag">no data</span>' : '';
+        body += `<tr${rowClass}><td><span class="country-tag">${escapeHtml(r.country)}</span></td><td>${r.date}${noDataTag}</td><td class="num">${r.stores.size}</td><td class="num">${r.images}</td></tr>`;
+        totalsByCountry[r.country] = totalsByCountry[r.country] || {stores:0, images:0};
+        totalsByCountry[r.country].stores += r.stores.size;
+        totalsByCountry[r.country].images += r.images;
         grandImages += r.images;
       });
       // grand total row for images (store totals aren't summed across dates meaningfully as "unique", so we sum row counts as a volume indicator)
@@ -851,66 +700,6 @@
       });
     }
     reportArea.appendChild(sec2);
-
-    // ---- Section 3: Top annotated image links per file ----
-    const sec3 = document.createElement('section');
-    sec3.className = 'report';
-    sec3.innerHTML = '<h2>Top annotated image links, per file</h2><p class="desc">Each file\'s rows sorted by annotation count, highest to lowest — the top 25 image links per file (all of them if a file has fewer than 20 annotated rows).</p>';
-
-    const withData = annotationPerFile.filter(f => f.hasData);
-    const withoutData = annotationPerFile.filter(f => !f.hasData);
-
-    if (withData.length === 0){
-      sec3.innerHTML += '<p class="empty-note">None of the uploaded files have both an annotation-count column and an image-link column, so this report has nothing to show.</p>';
-    } else {
-      const allCsvRows = [];
-      withData.forEach(f => f.rows.forEach((r,i) => allCsvRows.push([
-        f.country, f.fileName, i+1, r.date || '', r.shopId ?? '', r.shopName ?? '', r.annotationCount, r.imageLink ?? ''
-      ])));
-
-      const toolbar = document.createElement('div');
-      toolbar.className = 'table-toolbar';
-      const dlBtn = document.createElement('button');
-      dlBtn.textContent = 'Download CSV';
-      dlBtn.addEventListener('click', () => downloadCSV(
-        ['Country','File','Rank','Date','Shop ID','Shop Name','Annotation Count','Image Link'],
-        allCsvRows,
-        'top_annotated_image_links.csv'
-      ));
-      toolbar.appendChild(dlBtn);
-      sec3.appendChild(toolbar);
-
-      withData.forEach(f => {
-        const block = document.createElement('div');
-        block.className = 'flag-issue-block';
-        let body = `<div style="margin-bottom:8px;"><span class="country-tag">${escapeHtml(f.country)}</span> <span style="color:var(--muted); font-size:13px; margin-left:6px;">${escapeHtml(f.fileName)} — top ${f.rows.length} of its annotated rows</span></div>`;
-        body += '<table><thead><tr><th class="num">Rank</th><th>Date</th><th>Shop ID</th><th>Shop Name</th><th class="num">Annotation Count</th><th>Image Link</th></tr></thead><tbody>';
-        f.rows.forEach((r, i) => {
-          const linkCell = r.imageLink
-            ? `<a href="${escapeHtml(r.imageLink)}" target="_blank" rel="noopener noreferrer">Open image</a>`
-            : '—';
-          body += `<tr>
-            <td class="num">${i+1}</td>
-            <td>${r.date || '—'}</td>
-            <td>${escapeHtml(r.shopId ?? '—')}</td>
-            <td>${escapeHtml(r.shopName || '—')}</td>
-            <td class="num">${r.annotationCount}</td>
-            <td>${linkCell}</td>
-          </tr>`;
-        });
-        body += '</tbody>';
-        block.innerHTML = body;
-        sec3.appendChild(block);
-      });
-
-      if (withoutData.length){
-        const note = document.createElement('p');
-        note.className = 'empty-note';
-        note.textContent = 'No annotation-count / image-link columns found in: ' + withoutData.map(f => f.fileName).join(', ') + ' — skipped for this report.';
-        sec3.appendChild(note);
-      }
-    }
-    reportArea.appendChild(sec3);
   }
 
   function escapeHtml(v){
@@ -938,77 +727,6 @@
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }
-
-  // ---------- run history (Firebase Realtime Database) ----------
-
-  function saveRun(snapshot){
-    db.ref('runs').push(snapshot).catch(err => {
-      console.error('Could not save run history:', err);
-    });
-  }
-
-  function formatTimestamp(ts){
-    try{
-      return new Date(ts).toLocaleString();
-    } catch(e){
-      return String(ts);
-    }
-  }
-
-  function loadHistoryList(){
-    if (!firebaseReady) return;
-    db.ref('runs').orderByChild('timestamp').limitToLast(HISTORY_LIMIT).once('value')
-      .then(snap => {
-        const val = snap.val();
-        historyList.innerHTML = '';
-        if (!val){
-          historyList.innerHTML = '<div class="history-item"><span class="h-meta">No runs saved yet — build a report to start the history.</span></div>';
-          return;
-        }
-        const runs = Object.keys(val).map(key => Object.assign({ key }, val[key]));
-        runs.sort((a,b) => b.timestamp - a.timestamp);
-        runs.forEach(run => {
-          const item = document.createElement('div');
-          item.className = 'history-item';
-          const fileNames = (run.files || []).map(f => f.name).join(', ') || 'unnamed files';
-          const meta = document.createElement('span');
-          meta.className = 'h-meta';
-          meta.textContent = formatTimestamp(run.timestamp) + ' — ' + fileNames;
-          const viewBtn = document.createElement('button');
-          viewBtn.textContent = 'View';
-          viewBtn.addEventListener('click', () => loadRunIntoView(run));
-          item.appendChild(meta);
-          item.appendChild(viewBtn);
-          historyList.appendChild(item);
-        });
-      })
-      .catch(err => {
-        historyList.innerHTML = '<div class="history-item"><span class="h-meta">Could not load history: ' + escapeHtml(err.message || err) + '</span></div>';
-      });
-  }
-
-  function loadLatestRunIfIdle(){
-    if (!firebaseReady || userHasBuiltThisSession) return;
-    db.ref('runs').orderByChild('timestamp').limitToLast(1).once('value')
-      .then(snap => {
-        if (userHasBuiltThisSession) return; // user started their own upload while this was loading
-        const val = snap.val();
-        if (!val) return;
-        const run = Object.values(val)[0];
-        loadRunIntoView(run);
-      })
-      .catch(() => { /* silent — local mode still works */ });
-  }
-
-  function loadRunIntoView(run){
-    renderReport(run.dailyVolume || [], run.flagIssues || [], run.annotationPerFile || [], run.files || []);
-    const fileNames = (run.files || []).map(f => f.name).join(', ') || 'unnamed files';
-    viewingBanner.innerHTML = '';
-    const banner = document.createElement('div');
-    banner.className = 'viewing-banner';
-    banner.innerHTML = `<span>Showing the last saved run from <strong>${escapeHtml(formatTimestamp(run.timestamp))}</strong> (${escapeHtml(fileNames)}). Upload your own files above to run a fresh report.</span>`;
-    viewingBanner.appendChild(banner);
   }
 
 })();
