@@ -415,6 +415,8 @@
       tagger: find(['tagger']),
       username: find(['username']),
       appVersion: find(['appversion']),
+      imageLink: find(['imagelinkwithannotations','imagelink','annotatedimagelink']),
+      annotationCount: find(['annotationcount']),
     };
   }
 
@@ -529,11 +531,13 @@
     // per-date aggregation: key = country|date
     const dateAgg = {}; // { 'Country|2026-08-24': {country, date, stores:Set, images:0} }
     const flagIssues = []; // rows where analytics flag == 0
+    const topAnnotatedByFile = []; // [{ fileName, country, rows: [...] }]
 
     usable.forEach(entry => {
       const cm = entry.colMap;
       const usesPerRowImages = cm.imagesCol !== -1;      // Portugal-style
       const usesRowAsImage = !usesPerRowImages && cm.totalImagesCol !== -1; // Czechia-style
+      const annotatedRows = [];
 
       entry.rows.forEach(r => {
         const dateRaw = cm.date !== -1 ? r[cm.date] : null;
@@ -571,7 +575,33 @@
             tagger: cm.tagger !== -1 ? r[cm.tagger] : (cm.username !== -1 ? r[cm.username] : null),
           });
         }
+
+        // top annotated image links (per file)
+        if (cm.imageLink !== -1 && cm.annotationCount !== -1){
+          const link = r[cm.imageLink];
+          const rawCount = r[cm.annotationCount];
+          const count = (typeof rawCount === 'number') ? rawCount : parseFloat(rawCount);
+          if (link !== null && link !== undefined && link !== '' && !isNaN(count)){
+            annotatedRows.push({
+              date: dateKey,
+              shopId: shopId,
+              shopName: shopName,
+              category: category,
+              annotationCount: count,
+              link: link,
+            });
+          }
+        }
       });
+
+      if (annotatedRows.length > 0){
+        annotatedRows.sort((a,b) => b.annotationCount - a.annotationCount);
+        topAnnotatedByFile.push({
+          fileName: entry.name,
+          country: entry.country,
+          rows: annotatedRows.slice(0, 25),
+        });
+      }
     });
 
     // ---- fill gaps: every country should show every date in the reported
@@ -598,10 +628,10 @@
       });
     }
 
-    renderReport(dateAgg, flagIssues, usable);
+    renderReport(dateAgg, flagIssues, usable, topAnnotatedByFile);
   }
 
-  function renderReport(dateAgg, flagIssues, usable){
+  function renderReport(dateAgg, flagIssues, usable, topAnnotatedByFile){
     reportArea.innerHTML = '';
 
     // ---- Section 1: Daily volume ----
@@ -700,6 +730,49 @@
       });
     }
     reportArea.appendChild(sec2);
+
+    // ---- Section 3: Top annotated image links, per file ----
+    const sec3 = document.createElement('section');
+    sec3.className = 'report';
+    sec3.innerHTML = '<h2>Top annotated image links, per file</h2><p class="desc">The 25 rows with the highest annotation count in each uploaded file, with a link to the annotated image.</p>';
+
+    if (!topAnnotatedByFile || topAnnotatedByFile.length === 0){
+      sec3.innerHTML += '<p class="empty-note">No "Image Link with Annotations" / "Annotation Count" columns found in the uploaded files.</p>';
+    } else {
+      topAnnotatedByFile.forEach(fileGroup => {
+        const block = document.createElement('div');
+        block.className = 'flag-issue-block';
+
+        let body = `<div style="margin-bottom:8px; display:flex; align-items:center; justify-content:space-between;">
+          <div><span class="country-tag">${escapeHtml(fileGroup.country)}</span> <span style="color:var(--muted); font-size:13px; margin-left:6px;">${escapeHtml(fileGroup.fileName)}</span></div>
+        </div>`;
+        body += '<div class="table-toolbar"><button type="button" data-dl="1">Download CSV</button></div>';
+        body += '<table><thead><tr><th class="num">Rank</th><th>Date</th><th>Shop ID</th><th>Shop Name</th><th>Category</th><th class="num">Annotation Count</th><th>Image Link</th></tr></thead><tbody>';
+        fileGroup.rows.forEach((r, i) => {
+          body += `<tr>
+            <td class="num">${i+1}</td>
+            <td>${r.date}</td>
+            <td>${escapeHtml(r.shopId ?? '—')}</td>
+            <td>${escapeHtml(r.shopName || '—')}</td>
+            <td>${escapeHtml(r.category || '—')}</td>
+            <td class="num">${r.annotationCount}</td>
+            <td><a href="${escapeHtml(r.link)}" target="_blank" rel="noopener noreferrer">Open image</a></td>
+          </tr>`;
+        });
+        body += '</tbody>';
+        block.innerHTML = body;
+
+        const dlBtn = block.querySelector('button[data-dl]');
+        dlBtn.addEventListener('click', () => downloadCSV(
+          ['Rank','Date','Shop ID','Shop Name','Category','Annotation Count','Image Link'],
+          fileGroup.rows.map((r,i) => [i+1, r.date, r.shopId ?? '', r.shopName ?? '', r.category ?? '', r.annotationCount, r.link]),
+          'top_annotated_images_' + fileGroup.country.toLowerCase() + '.csv'
+        ));
+
+        sec3.appendChild(block);
+      });
+    }
+    reportArea.appendChild(sec3);
   }
 
   function escapeHtml(v){
