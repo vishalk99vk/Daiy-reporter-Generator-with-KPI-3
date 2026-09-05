@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Store &amp; Image Volume Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg: #F7F6F2;
+    --panel: #FFFFFF;
+    --ink: #1B1F23;
+    --muted: #6B7078;
+    --line: #E3E1DA;
+    --accent: #2C6E6B;
+    --accent-ink: #FFFFFF;
+    --warn-bg: #FBEEEC;
+    --warn-line: #E7B9B0;
+    --warn-ink: #9A3B2E;
+    --ok-bg: #EEF3EC;
+    --ok-line: #C6D9C0;
+    --radius: 3px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'IBM Plex Sans', -apple-system, sans-serif;
+    line-height:1.45;
+    padding:0 0 80px 0;
+  }
+  .wrap{
+    max-width:1040px;
+    margin:0 auto;
+    padding:0 28px;
+  }
+  header.top{
+    padding:48px 0 28px 0;
+    border-bottom:1px solid var(--line);
+    margin-bottom:32px;
+  }
+  header.top h1{
+    font-size:28px;
+    font-weight:600;
+    letter-spacing:-0.01em;
+    margin:0 0 8px 0;
+  }
+  header.top p{
+    color:var(--muted);
+    font-size:15px;
+    margin:0;
+    max-width:560px;
+  }
+
+  .dropzone{
+    border:1.5px dashed #C9C6BC;
+    border-radius:var(--radius);
+    background:var(--panel);
+    padding:36px 24px;
+    text-align:center;
+    cursor:pointer;
+    transition:border-color .15s ease, background .15s ease;
+  }
+  .dropzone:hover, .dropzone.drag{
+    border-color:var(--accent);
+    background:#F1F5F4;
+  }
+  .dropzone input{display:none;}
+  .dropzone .dz-title{
+    font-size:15px;
+    font-weight:500;
+    margin-bottom:4px;
+  }
+  .dropzone .dz-sub{
+    font-size:13px;
+    color:var(--muted);
+  }
+
+  .filelist{
+    margin-top:18px;
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .file-row{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:12px 14px;
+    font-size:13.5px;
+  }
+  .file-row .fname{
+    flex:1;
+    color:var(--ink);
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .file-row .country-field{
+    display:flex;
+    align-items:center;
+    gap:6px;
+  }
+  .file-row .country-field label{
+    color:var(--muted);
+    font-size:12px;
+  }
+  .file-row input.country-input{
+    font-family:inherit;
+    font-size:13px;
+    padding:4px 8px;
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    width:130px;
+    background:#FCFCFA;
+  }
+  .file-row .status{
+    font-size:12px;
+    padding:3px 8px;
+    border-radius:12px;
+    white-space:nowrap;
+  }
+  .status.ok{background:var(--ok-bg); color:#3E6B37; border:1px solid var(--ok-line);}
+  .status.err{background:var(--warn-bg); color:var(--warn-ink); border:1px solid var(--warn-line);}
+  .file-row .remove{
+    cursor:pointer;
+    color:var(--muted);
+    font-size:16px;
+    line-height:1;
+    padding:2px 4px;
+  }
+  .file-row .remove:hover{color:var(--warn-ink);}
+
+  .actions{
+    margin-top:20px;
+    display:flex;
+    gap:10px;
+    align-items:center;
+  }
+  button.primary{
+    font-family:inherit;
+    background:var(--accent);
+    color:var(--accent-ink);
+    border:none;
+    border-radius:var(--radius);
+    padding:10px 18px;
+    font-size:14px;
+    font-weight:500;
+    cursor:pointer;
+  }
+  button.primary:disabled{
+    background:#B9C7C6;
+    cursor:not-allowed;
+  }
+  button.ghost{
+    font-family:inherit;
+    background:transparent;
+    color:var(--muted);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:10px 16px;
+    font-size:13.5px;
+    cursor:pointer;
+  }
+  button.ghost:hover{border-color:#B9B6AC; color:var(--ink);}
+
+  section.report{
+    margin-top:44px;
+  }
+  section.report h2{
+    font-size:17px;
+    font-weight:600;
+    margin:0 0 4px 0;
+  }
+  section.report .desc{
+    color:var(--muted);
+    font-size:13.5px;
+    margin:0 0 16px 0;
+  }
+
+  table{
+    width:100%;
+    border-collapse:collapse;
+    background:var(--panel);
+    border:1px solid var(--line);
+    font-size:13.5px;
+  }
+  thead th{
+    text-align:left;
+    font-weight:600;
+    font-size:12px;
+    color:var(--muted);
+    padding:10px 12px;
+    border-bottom:1px solid var(--line);
+    background:#FBFAF7;
+  }
+  tbody td{
+    padding:9px 12px;
+    border-bottom:1px solid #EFEEE9;
+  }
+  tbody tr:last-child td{border-bottom:none;}
+  td.num, th.num{
+    font-family:'IBM Plex Mono', monospace;
+    text-align:right;
+    font-variant-numeric:tabular-nums;
+  }
+  tbody tr.total-row td{
+    font-weight:600;
+    background:#FBFAF7;
+    border-top:1.5px solid var(--line);
+  }
+  .country-tag{
+    display:inline-block;
+    font-size:11.5px;
+    font-weight:500;
+    padding:2px 8px;
+    border-radius:10px;
+    background:#EAEFEE;
+    color:var(--accent);
+  }
+
+  .empty-note{
+    color:var(--muted);
+    font-size:13.5px;
+    padding:16px 0;
+  }
+
+  .flag-issue-block{
+    margin-bottom:22px;
+  }
+  .flag-issue-block:last-child{margin-bottom:0;}
+
+  .table-toolbar{
+    display:flex;
+    justify-content:flex-end;
+    margin-bottom:10px;
+  }
+  .table-toolbar button{
+    font-family:inherit;
+    font-size:12.5px;
+    background:transparent;
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:6px 12px;
+    color:var(--muted);
+    cursor:pointer;
+  }
+  .table-toolbar button:hover{color:var(--ink); border-color:#B9B6AC;}
+
+  .hidden{display:none !important;}
+
+  ::selection{background:#CFE0DD;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <h1>Store &amp; Image Volume Report</h1>
+    <p>Upload the country tagging/volume files. It reads each file, works out which country it belongs to, and builds the per-date store/image counts and a list of any rows with analytics flag 0 — combined across every file you drop in.</p>
+  </header>
+
+  <div class="dropzone" id="dropzone">
+    <input type="file" id="fileInput" multiple accept=".xlsx,.xls">
+    <div class="dz-title">Drop .xlsx files here, or click to browse</div>
+    <div class="dz-sub">Multiple countries at once are fine — each file is kept separate until the reports are built</div>
+  </div>
+
+  <div class="filelist" id="fileList"></div>
+
+  <div class="actions">
+    <button class="primary" id="buildBtn" disabled>Build report</button>
+    <button class="ghost" id="clearBtn">Clear all</button>
+  </div>
+
+  <div id="reportArea"></div>
+
+</div>
+
+<script>
+(function(){
+
+  // ---------- state ----------
+  let entries = []; // { id, file, name, country, workbook, sheetName, headers, rows, colMap, parseError }
+  let idCounter = 0;
+
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const fileList = document.getElementById('fileList');
+  const buildBtn = document.getElementById('buildBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const reportArea = document.getElementById('reportArea');
+
+  dropzone.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+  dropzone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzone.classList.remove('drag');
+    handleFiles(e.dataTransfer.files);
+  });
+  fileInput.addEventListener('change', e => handleFiles(e.target.files));
+  clearBtn.addEventListener('click', () => {
+    entries = [];
+    renderFileList();
+    reportArea.innerHTML = '';
+    fileInput.value = '';
+  });
+
+  function handleFiles(fileArr){
+    Array.from(fileArr).forEach(file => {
+      const id = 'f' + (idCounter++);
+      const entry = { id, file, name: file.name, country: guessCountry(file.name), workbook: null, parseError: null, ready:false };
+      entries.push(entry);
+      readFile(entry);
+    });
+    renderFileList();
+  }
+
+  function guessCountry(filename){
+    // Strip extension
+    let base = filename.replace(/\.(xlsx|xls)$/i, '');
+    // Try pattern: BAT[_-]*<Country>[_-]*Prod
+    let m = base.match(/BAT[_\s-]+([A-Za-z]+)[_\s-]+Prod/i);
+    if (m) return capitalize(m[1]);
+    // Fallback: look for a capitalized word after BAT
+    m = base.match(/BAT[_\s-]+([A-Za-z]+)/i);
+    if (m) return capitalize(m[1]);
+    return 'Unknown';
+  }
+  function capitalize(s){
+    return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+  }
+
+  function readFile(entry){
+    const reader = new FileReader();
+    reader.onload = function(e){
+      try{
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, { type:'array', cellDates:true });
+        const sheetName = wb.SheetNames[0];
+        const ws = wb.Sheets[sheetName];
+        const json = XLSX.utils.sheet_to_json(ws, { header:1, raw:true, defval:null });
+        if (!json || json.length < 2) throw new Error('No data rows found');
+        const headers = json[0].map(h => (h === null || h === undefined) ? '' : String(h));
+        const rows = json.slice(1).filter(r => r.some(c => c !== null && c !== ''));
+        entry.headers = headers;
+        entry.rows = rows;
+        entry.colMap = buildColMap(headers);
+        entry.sheetName = sheetName;
+        entry.ready = true;
+        entry.parseError = null;
+      } catch(err){
+        entry.parseError = err.message || 'Could not read file';
+        entry.ready = false;
+      }
+      renderFileList();
+    };
+    reader.onerror = function(){
+      entry.parseError = 'Failed to read file';
+      renderFileList();
+    };
+    reader.readAsArrayBuffer(entry.file);
+  }
+
+  function normalize(h){
+    return String(h).toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  function buildColMap(headers){
+    const norm = headers.map(normalize);
+    const find = (candidates) => {
+      for (const c of candidates){
+        const idx = norm.indexOf(c);
+        if (idx !== -1) return idx;
+      }
+      return -1;
+    };
+    return {
+      date: find(['date']),
+      shopId: find(['clientshopid','shopid']),
+      shopIdAlt: find(['shopid']), // secondary numeric shop id, used for display fallback only
+      shopName: find(['shopname']),
+      category: find(['categoryname','category']),
+      analyticsFlag: find(['analyticsflag']),
+      totalImagesCol: find(['totalimages']), // Czechia-style: row == 1 image, this is the group total
+      imagesCol: find(['images']),           // Portugal-style: per-row image count
+      tagger: find(['tagger']),
+      username: find(['username']),
+      appVersion: find(['appversion']),
+    };
+  }
+
+  function renderFileList(){
+    fileList.innerHTML = '';
+    entries.forEach(entry => {
+      const row = document.createElement('div');
+      row.className = 'file-row';
+
+      const fname = document.createElement('div');
+      fname.className = 'fname';
+      fname.textContent = entry.name;
+      row.appendChild(fname);
+
+      const cf = document.createElement('div');
+      cf.className = 'country-field';
+      const label = document.createElement('label');
+      label.textContent = 'Country';
+      const input = document.createElement('input');
+      input.className = 'country-input';
+      input.value = entry.country;
+      input.addEventListener('input', () => { entry.country = input.value; });
+      cf.appendChild(label);
+      cf.appendChild(input);
+      row.appendChild(cf);
+
+      const status = document.createElement('div');
+      if (entry.parseError){
+        status.className = 'status err';
+        status.textContent = entry.parseError;
+      } else if (entry.ready){
+        status.className = 'status ok';
+        status.textContent = entry.rows.length + ' rows read';
+      } else {
+        status.className = 'status';
+        status.textContent = 'Reading…';
+      }
+      row.appendChild(status);
+
+      const remove = document.createElement('div');
+      remove.className = 'remove';
+      remove.textContent = '✕';
+      remove.title = 'Remove file';
+      remove.addEventListener('click', () => {
+        entries = entries.filter(e => e.id !== entry.id);
+        renderFileList();
+      });
+      row.appendChild(remove);
+
+      fileList.appendChild(row);
+    });
+
+    buildBtn.disabled = entries.length === 0 || !entries.every(e => e.ready || e.parseError);
+  }
+
+  buildBtn.addEventListener('click', buildReport);
+
+  // ---------- report building ----------
+
+  function toDateKey(v){
+    if (v === null || v === undefined) return null;
+    if (v instanceof Date) {
+      return v.toISOString().slice(0,10);
+    }
+    if (typeof v === 'number'){
+      // excel serial fallback
+      const d = XLSX.SSF.parse_date_code(v);
+      if (!d) return null;
+      return d.y + '-' + String(d.m).padStart(2,'0') + '-' + String(d.d).padStart(2,'0');
+    }
+    // string date
+    const parsed = new Date(v);
+    if (!isNaN(parsed)) return parsed.toISOString().slice(0,10);
+    return String(v);
+  }
+
+  function isZero(v){
+    if (v === null || v === undefined) return false;
+    if (typeof v === 'number') return v === 0;
+    const s = String(v).trim();
+    return s === '0';
+  }
+
+  function buildReport(){
+    const usable = entries.filter(e => e.ready && !e.parseError);
+    if (usable.length === 0){
+      reportArea.innerHTML = '<p class="empty-note">No readable files to report on.</p>';
+      return;
+    }
+
+    // per-date aggregation: key = country|date
+    const dateAgg = {}; // { 'Country|2026-08-24': {country, date, stores:Set, images:0} }
+    const flagIssues = []; // rows where analytics flag == 0
+
+    usable.forEach(entry => {
+      const cm = entry.colMap;
+      const usesPerRowImages = cm.imagesCol !== -1;      // Portugal-style
+      const usesRowAsImage = !usesPerRowImages && cm.totalImagesCol !== -1; // Czechia-style
+
+      entry.rows.forEach(r => {
+        const dateRaw = cm.date !== -1 ? r[cm.date] : null;
+        const dateKey = toDateKey(dateRaw);
+        if (!dateKey) return;
+
+        const shopId = cm.shopId !== -1 ? r[cm.shopId] : (cm.shopIdAlt !== -1 ? r[cm.shopIdAlt] : null);
+        const shopName = cm.shopName !== -1 ? r[cm.shopName] : null;
+        const category = cm.category !== -1 ? r[cm.category] : null;
+
+        let imageCount = 1; // fallback: each row = 1 image
+        if (usesPerRowImages){
+          const v = r[cm.imagesCol];
+          imageCount = (typeof v === 'number') ? v : (parseFloat(v) || 0);
+        } else if (usesRowAsImage){
+          imageCount = 1; // each row already represents a single image
+        }
+
+        const aggKey = entry.country + '|' + dateKey;
+        if (!dateAgg[aggKey]){
+          dateAgg[aggKey] = { country: entry.country, date: dateKey, stores: new Set(), images: 0 };
+        }
+        if (shopId !== null && shopId !== undefined && shopId !== '') dateAgg[aggKey].stores.add(shopId);
+        dateAgg[aggKey].images += imageCount;
+
+        // analytics flag check
+        if (cm.analyticsFlag !== -1 && isZero(r[cm.analyticsFlag])){
+          flagIssues.push({
+            country: entry.country,
+            date: dateKey,
+            shopId: shopId,
+            shopName: shopName,
+            category: category,
+            images: usesPerRowImages ? imageCount : (cm.totalImagesCol !== -1 ? r[cm.totalImagesCol] : imageCount),
+            tagger: cm.tagger !== -1 ? r[cm.tagger] : (cm.username !== -1 ? r[cm.username] : null),
+          });
+        }
+      });
+    });
+
+    renderReport(dateAgg, flagIssues, usable);
+  }
+
+  function renderReport(dateAgg, flagIssues, usable){
+    reportArea.innerHTML = '';
+
+    // ---- Section 1: Daily volume ----
+    const sec1 = document.createElement('section');
+    sec1.className = 'report';
+    sec1.innerHTML = '<h2>Daily store &amp; image volume</h2><p class="desc">Distinct stores and total images tagged per date, grouped by country.</p>';
+
+    const rows = Object.values(dateAgg).sort((a,b) => {
+      if (a.country !== b.country) return a.country.localeCompare(b.country);
+      return a.date.localeCompare(b.date);
+    });
+
+    if (rows.length === 0){
+      sec1.innerHTML += '<p class="empty-note">No dated rows found across the uploaded files.</p>';
+    } else {
+      const toolbar = document.createElement('div');
+      toolbar.className = 'table-toolbar';
+      const dlBtn = document.createElement('button');
+      dlBtn.textContent = 'Download CSV';
+      dlBtn.addEventListener('click', () => downloadCSV(
+        ['Country','Date','Stores','Images'],
+        rows.map(r => [r.country, r.date, r.stores.size, r.images]),
+        'daily_store_image_volume.csv'
+      ));
+      toolbar.appendChild(dlBtn);
+      sec1.appendChild(toolbar);
+
+      const table = document.createElement('table');
+      const totalsByCountry = {};
+      let grandStores = 0, grandImages = 0;
+
+      let body = '<thead><tr><th>Country</th><th>Date</th><th class="num">Stores</th><th class="num">Images</th></tr></thead><tbody>';
+      rows.forEach(r => {
+        body += `<tr><td><span class="country-tag">${escapeHtml(r.country)}</span></td><td>${r.date}</td><td class="num">${r.stores.size}</td><td class="num">${r.images}</td></tr>`;
+        totalsByCountry[r.country] = totalsByCountry[r.country] || {stores:0, images:0};
+        totalsByCountry[r.country].stores += r.stores.size;
+        totalsByCountry[r.country].images += r.images;
+        grandImages += r.images;
+      });
+      // grand total row for images (store totals aren't summed across dates meaningfully as "unique", so we sum row counts as a volume indicator)
+      body += `<tr class="total-row"><td colspan="2">Total (all countries, all dates)</td><td class="num">—</td><td class="num">${grandImages}</td></tr>`;
+      body += '</tbody>';
+      table.innerHTML = body;
+      sec1.appendChild(table);
+    }
+    reportArea.appendChild(sec1);
+
+    // ---- Section 2: Analytics flag = 0 details ----
+    const sec2 = document.createElement('section');
+    sec2.className = 'report';
+    sec2.innerHTML = '<h2>Analytics flag = 0 — store details</h2><p class="desc">Individual rows where the analytics flag came through as 0, listed separately by country.</p>';
+
+    if (flagIssues.length === 0){
+      sec2.innerHTML += '<p class="empty-note">No rows with analytics flag 0 found in any uploaded file.</p>';
+    } else {
+      const byCountry = {};
+      flagIssues.forEach(f => {
+        byCountry[f.country] = byCountry[f.country] || [];
+        byCountry[f.country].push(f);
+      });
+
+      const toolbar = document.createElement('div');
+      toolbar.className = 'table-toolbar';
+      const dlBtn = document.createElement('button');
+      dlBtn.textContent = 'Download CSV';
+      dlBtn.addEventListener('click', () => downloadCSV(
+        ['Country','Date','Shop ID','Shop Name','Category','Images','Tagger'],
+        flagIssues.map(f => [f.country, f.date, f.shopId ?? '', f.shopName ?? '', f.category ?? '', f.images ?? '', f.tagger ?? '']),
+        'analytics_flag_zero_details.csv'
+      ));
+      toolbar.appendChild(dlBtn);
+      sec2.appendChild(toolbar);
+
+      Object.keys(byCountry).sort().forEach(country => {
+        const block = document.createElement('div');
+        block.className = 'flag-issue-block';
+        const list = byCountry[country];
+
+        let body = `<div style="margin-bottom:8px;"><span class="country-tag">${escapeHtml(country)}</span> <span style="color:var(--muted); font-size:13px; margin-left:6px;">${list.length} row${list.length===1?'':'s'}</span></div>`;
+        body += '<table><thead><tr><th>Date</th><th>Shop ID</th><th>Shop Name</th><th>Category</th><th class="num">Images</th><th>Tagger</th></tr></thead><tbody>';
+        list.sort((a,b) => a.date.localeCompare(b.date)).forEach(f => {
+          body += `<tr>
+            <td>${f.date}</td>
+            <td>${escapeHtml(f.shopId ?? '—')}</td>
+            <td>${escapeHtml(f.shopName || '—')}</td>
+            <td>${escapeHtml(f.category || '—')}</td>
+            <td class="num">${f.images ?? '—'}</td>
+            <td>${escapeHtml(f.tagger || '—')}</td>
+          </tr>`;
+        });
+        body += '</tbody>';
+        block.innerHTML = body;
+        sec2.appendChild(block);
+      });
+    }
+    reportArea.appendChild(sec2);
+  }
+
+  function escapeHtml(v){
+    if (v === null || v === undefined) return '';
+    return String(v)
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;');
+  }
+
+  function downloadCSV(headers, rows, filename){
+    const esc = (v) => {
+      const s = String(v ?? '');
+      if (/[",\n]/.test(s)) return '"' + s.replace(/"/g,'""') + '"';
+      return s;
+    };
+    const lines = [headers.map(esc).join(',')].concat(rows.map(r => r.map(esc).join(',')));
+    const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+})();
+</script>
+</body>
+</html>
